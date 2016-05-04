@@ -10,11 +10,14 @@ import scala.xml._
 
 object Crashlytics {
 
-  val fabricApiKey = settingKey[Option[String]]("")
-  val fabricApiSecret = settingKey[Option[String]]("")
-  val crashlyticsBuildId = settingKey[String]("")
+  private val PROPERTIES_API_KEY_KEY = "fabric.apiKey"
+  private val PROPERTIES_API_SECRET_KEY = "fabric.apiKey"
 
-  private val localProperties = settingKey[Map[String, String]]("")
+  val fabricApiKey = settingKey[Option[String]]("API Key to identity you at fabric.io")
+  val fabricApiSecret = settingKey[Option[String]]("API Secret for the project")
+
+  private val crashlyticsBuildId = settingKey[String]("Build ID to determine any build")
+  private val localProperties = settingKey[Map[String, String]]("Properties loaded from local.properties")
 
   val crashlyticsSettings: Seq[Setting[_]] = Seq(
     localProperties := {
@@ -23,8 +26,8 @@ object Crashlytics {
       prop.asScala.toMap
     },
     crashlyticsBuildId := java.util.UUID.randomUUID.toString,
-    fabricApiKey <<= localProperties { _ get "fabric.apiKey" },
-    fabricApiSecret <<= localProperties { _ get "fabric.apiSecret" },
+    fabricApiKey <<= localProperties { _ get PROPERTIES_API_KEY_KEY },
+    fabricApiSecret <<= localProperties { _ get PROPERTIES_API_SECRET_KEY },
 
     resValues <<= (crashlyticsBuildId, resValues) map { (id, seq) =>
       seq :+ ("string", "com.crashlytics.android.build_id", id)
@@ -47,16 +50,11 @@ object Crashlytics {
     },
 
     collectResources <<= (name, applicationId, crashlyticsBuildId, versionName, versionCode, collectResources) map { (name, packageName, id, verName, verCode, v) =>
-      val toGen = v._1 / "crashlytics-build.properties"
-      if(!toGen.exists()) {
-        val prop = new Properties
-        prop.put("app_name", name)
-        prop.put("package_name", packageName)
-        prop.put("build_id", id)
-        prop.put("version_name", verName.get)
-        prop.put("version_code", verCode.get.toString)
-        IO.write(prop, "", toGen)
-      }
+      val prop = new Properties
+      Seq("app_name" -> name, "package_name" -> packageName,
+        "build_id" -> id, "version_name" -> verName.get,
+        "version_code" -> verCode.get.toString) foreach (v => prop.put(v._1, v._2))
+      IO.write(prop, "Auto-generated properties file for crashlytics", v._1 / "crashlytics-build.properties")
       v
     })
 
