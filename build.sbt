@@ -1,12 +1,21 @@
 val crashlytics = Project(id = "sbt-crashlytics", base = file("."))
 
+// Unsorted settings
 sbtPlugin := true
+
+// Dependency settings
+addSbtPlugin("org.scala-android" % "sbt-android" % "1.6.2")
+
+// Scripted testing settings
+ScriptedPlugin.scriptedSettings
+
+// Publishing-related settings
 name := "sbt-crashlytics"
 description := "Unofficial plugin that provides crashlytics support for android applications that was built via sbt"
 organization := "com.seroperson"
-version := "0.1"
-licenses := Seq("MIT License" -> url("http://www.opensource.org/licenses/MIT"))
+licenses := Seq("MIT" -> url("http://www.opensource.org/licenses/MIT"))
+version := "0.2"
 
-addSbtPlugin("org.scala-android" % "sbt-android" % "1.6.1")
-
-ScriptedPlugin.scriptedSettings
+publishMavenStyle := false
+bintrayOrganization := None
+bintrayVcsUrl := Some("https://github.com/seroperson/sbt-crashlytics")

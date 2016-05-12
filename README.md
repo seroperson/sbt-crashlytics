@@ -6,13 +6,13 @@ Usage
 =====
 First of all, you need to include your [api key](https://fabric.io/settings/organizations/) in **local.properties** (by default):
 
-```
+```scala
 fabric.apiKey=my-api-key
 ```
 
 Now the action goes to **build.sbt** where you need to apply crashlytics settings to your android project:
 
-```
+```scala
 androidBuild
 minSdkVersion := "8"
 targetSdkVersion := "23"
@@ -21,8 +21,18 @@ platformSdk := "android-23"
 crashlyticsBuild
 ```
 
-And add the crashlytics sdk dependency (like you any other library - via libraryDependencies key).
+And add the crashlytics sdk dependency (like any other library - via libraryDependencies key).
 Basically it's all what you need.
+
+Download
+========
+Just include the following line in your **project/plugins.sbt**
+
+```scala
+addSbtPlugin("com.seroperson" % "sbt-crashlytics" % "0.1")
+```
+
+Be sure that you also included the latest version of sbt-android plugin.
 
 License
 =======
