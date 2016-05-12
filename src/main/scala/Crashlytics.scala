@@ -15,6 +15,7 @@ import scala.xml._
 object Crashlytics extends Plugin {
 
   import Keys._
+  import Constants._
 
   // There is 'io.fabric.tools % gradle' package with a lot of stuff that already implemented in,
   // but it's hard to use in result of couple of reasons.
@@ -29,13 +30,14 @@ object Crashlytics extends Plugin {
       IO.load(prop, file)
       prop.asScala.toMap
     },
+    // TODO it must be generated after each successful packaging
     crashlyticsBuildId := java.util.UUID.randomUUID.toString,
     fabricApiKey <<= crashlyticsProperties { _ get PROPERTIES_API_KEY_KEY },
     fabricApiSecret <<= crashlyticsProperties { _ get PROPERTIES_API_SECRET_KEY },
 
     // Writing com.crashlytics.android.build_id value directly to values.xml
     resValues <<= (crashlyticsBuildId, resValues) map { (id, seq) =>
-      seq :+("string", "com.crashlytics.android.build_id", id)
+      seq :+("string", RESOURCE_FABRIC_BUILD_ID_KEY, id)
     },
 
     // Instead of using io.fabric.tools apiKey manifest injection we inject it by own implementation
@@ -51,7 +53,7 @@ object Crashlytics extends Plugin {
             application.head.asInstanceOf[Elem].copy(
               child = application.head.child ++ new Elem(null, "meta-data", Null, TopScope, true) %
                 new PrefixedAttribute(prefix, "value", key.get, Null) %
-                new PrefixedAttribute(prefix, "name", "io.fabric.ApiKey", Null)))),
+                new PrefixedAttribute(prefix, "name", MANIFEST_FABRIC_META_KEY, Null)))),
         enc = "UTF-8",
         xmlDecl = true)
       file
@@ -64,9 +66,9 @@ object Crashlytics extends Plugin {
       Seq("app_name" -> name,
         "package_name" -> packageName,
         "build_id" -> id,
-        "version_name" -> verName.getOrElse("0.1"),
+        "version_name" -> verName.getOrElse("1.0-SNAPSHOT"),
         "version_code" -> verCode.getOrElse("1").toString) foreach (v => prop.put(v._1, v._2))
-      IO.write(prop, "Auto-generated properties file for crashlytics", assets / "crashlytics-build.properties")
+      IO.write(prop, ASSET_CRASHLYTICS_BUILD_DESC, assets / ASSET_CRASHLYTICS_BUILD_FILENAME)
       v
     })
 
