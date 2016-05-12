@@ -9,7 +9,4 @@ licenses := Seq("MIT License" -> url("http://www.opensource.org/licenses/MIT"))
 
 addSbtPlugin("org.scala-android" % "sbt-android" % "1.6.1")
 
-import ScriptedPlugin._
-
-scriptedSettings
-scriptedLaunchOpts := { scriptedLaunchOpts.value ++ Seq("-Xmx1024M", "-XX:MaxPermSize=256M", "-Dplugin.version=" + version.value) }
+ScriptedPlugin.scriptedSettings

@@ -1,3 +1,4 @@
 > android:compile
 $ exists target/android/intermediates/manifest/AndroidManifest.xml
 $ exists target/android/intermediates/assets/crashlytics-build.properties
+> check-injected-api-key
