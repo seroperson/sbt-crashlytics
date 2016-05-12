@@ -6,9 +6,9 @@ crashlyticsBuild
 fabricApiKey := Some("no-key")
 
 import android.Keys._
+import scala.xml.XML.loadFile
 TaskKey[Unit]("check-injected-api-key") <<= (projectLayout, outputLayout, fabricApiKey) map { (layout, converter, key) =>
-  import scala.xml.XML
-  val metadata = (XML.loadFile(converter.apply(layout).processedManifest) \ "application" \ "meta-data").head
+  val metadata = (loadFile(converter.apply(layout).processedManifest) \ "application" \ "meta-data").head
   val attributes = metadata.attributes
   if(Seq("value" -> key.get, "name" -> "io.fabric.ApiKey")
       .exists(v => !attributes.get(android.Resources.ANDROID_NS, metadata, v._1).head
@@ -17,5 +17,10 @@ TaskKey[Unit]("check-injected-api-key") <<= (projectLayout, outputLayout, fabric
   }
 }
 
-//TaskKey[Boolean]("check-injected-build-id") := {
-//}
+TaskKey[Unit]("check-injected-build-id") <<= (projectLayout, outputLayout, crashlyticsBuildId) map { (layout, converter, id) =>
+  if((loadFile(converter.apply(layout).mergedRes / "values/values.xml") \ "string")
+      .filter(_.attribute("name")
+        .exists(_.text == "com.crashlytics.android.build_id")).text != id) {
+    sys.error("failed")
+  }
+}
