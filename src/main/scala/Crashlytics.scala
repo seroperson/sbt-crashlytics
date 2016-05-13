@@ -24,8 +24,8 @@ object Crashlytics extends Plugin {
   private val PROPERTIES_API_SECRET_KEY = "fabric.apiSecret"
 
   lazy val crashlyticsBuild = Seq(
-    propertiesFile := new File("local.properties"),
-    crashlyticsProperties <<= propertiesFile { file =>
+    fabricPropertiesFile := new File("local.properties"),
+    crashlyticsProperties <<= fabricPropertiesFile { file =>
       val prop = new Properties
       IO.load(prop, file)
       prop.asScala.toMap
