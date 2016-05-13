@@ -14,14 +14,24 @@ import scala.xml._
 // There is no way to use autoplugin with sbt-android
 object Crashlytics extends Plugin {
 
-  import Keys._
   import Constants._
+  import Keys._
+
+  object Dependency {
+    val crashlytics =
+      "com.crashlytics.sdk.android" % "crashlytics" % DEPENDENCY_CRASHLYTICS_VERSION intransitive
+    val crashlyticsCore =
+      "com.crashlytics.sdk.android" % "crashlytics-core" % DEPENDENCY_CRASHLYTICS_CORE_VERSION intransitive
+    val crashlyticsAnswers =
+      "com.crashlytics.sdk.android" % "answers" % DEPENDENCY_CRASHLYTICS_ANSWERS_VERSION intransitive
+    val crashlyticsBeta =
+      "com.crashlytics.sdk.android" % "beta" % DEPENDENCY_CRASHLYTICS_BETA_VERSION intransitive
+    val fabric =
+      "io.fabric.sdk.android" % "fabric" % DEPENDENCY_FABRIC_VERSION intransitive
+  }
 
   // There is 'io.fabric.tools % gradle' package with a lot of stuff that already implemented in,
   // but it's hard to use in result of couple of reasons.
-
-  private val PROPERTIES_API_KEY_KEY = "fabric.apiKey"
-  private val PROPERTIES_API_SECRET_KEY = "fabric.apiSecret"
 
   lazy val crashlyticsBuild = Seq(
     fabricPropertiesFile := new File("local.properties"),
@@ -30,10 +40,20 @@ object Crashlytics extends Plugin {
       IO.load(prop, file)
       prop.asScala.toMap
     },
-    // TODO it must be generated after each successful packaging
-    crashlyticsBuildId := java.util.UUID.randomUUID.toString,
     fabricApiKey <<= crashlyticsProperties { _ get PROPERTIES_API_KEY_KEY },
     fabricApiSecret <<= crashlyticsProperties { _ get PROPERTIES_API_SECRET_KEY },
+    crashlyticsLibraries := {
+      import Dependency._
+      Seq(crashlytics, crashlyticsCore, crashlyticsAnswers, crashlyticsBeta, fabric)
+    },
+    // TODO it must be generated after each successful packaging
+    crashlyticsBuildId := java.util.UUID.randomUUID.toString,
+
+    // Adding fabric maven repository because there is nothing on mavencentral
+    resolvers += "fabric" at DEPENDENCY_FABRIC_MAVEN,
+
+    // Adding the set of predefined crashlytics libraries
+    libraryDependencies <++= crashlyticsLibraries,
 
     // Writing com.crashlytics.android.build_id value directly to values.xml
     resValues <<= (crashlyticsBuildId, resValues) map { (id, seq) =>
