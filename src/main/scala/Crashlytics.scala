@@ -40,7 +40,8 @@ object Crashlytics extends Plugin {
       IO.load(prop, file)
       prop.asScala.toMap
     },
-    fabricApiKey <<= crashlyticsProperties { _ get PROPERTIES_API_KEY_KEY },
+    fabricApiKey <<= crashlyticsProperties { _ getOrElse(PROPERTIES_API_KEY_KEY,
+      throw new IllegalStateException("You need to set fabric.apiKey property")) },
     fabricApiSecret <<= crashlyticsProperties { _ get PROPERTIES_API_SECRET_KEY },
     crashlyticsLibraries := {
       import Dependency._
@@ -72,7 +73,7 @@ object Crashlytics extends Plugin {
           child = xml.child.updated(xml.child.indexOf(application.head),
             application.head.asInstanceOf[Elem].copy(
               child = application.head.child ++ new Elem(null, "meta-data", Null, TopScope, true) %
-                new PrefixedAttribute(prefix, "value", key.get, Null) %
+                new PrefixedAttribute(prefix, "value", key, Null) %
                 new PrefixedAttribute(prefix, "name", MANIFEST_FABRIC_META_KEY, Null)))),
         enc = "UTF-8",
         xmlDecl = true)
@@ -86,7 +87,7 @@ object Crashlytics extends Plugin {
       Seq("app_name" -> name,
         "package_name" -> packageName,
         "build_id" -> id,
-        "version_name" -> verName.getOrElse("1.0-SNAPSHOT"),
+        "version_name" -> verName.getOrElse("0.1-SNAPSHOT"),
         "version_code" -> verCode.getOrElse("1").toString) foreach (v => prop.put(v._1, v._2))
       IO.write(prop, ASSET_CRASHLYTICS_BUILD_DESC, assets / ASSET_CRASHLYTICS_BUILD_FILENAME)
       v
