@@ -87,8 +87,8 @@ object Crashlytics extends Plugin {
       Seq("app_name" -> name,
         "package_name" -> packageName,
         "build_id" -> id,
-        "version_name" -> verName.getOrElse("0.1-SNAPSHOT"),
-        "version_code" -> verCode.getOrElse("1").toString) foreach (v => prop.put(v._1, v._2))
+        "version_name" -> verName.getOrElse(ASSET_CRASHLYTICS_DEFAULT_VERSION_NAME),
+        "version_code" -> verCode.getOrElse(ASSET_CRASHLYTICS_DEFAULT_VERSION_CODE).toString) foreach (v => prop.put(v._1, v._2))
       IO.write(prop, ASSET_CRASHLYTICS_BUILD_DESC, assets / ASSET_CRASHLYTICS_BUILD_FILENAME)
       v
     })

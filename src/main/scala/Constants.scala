@@ -16,6 +16,8 @@ object Constants {
 
   val RESOURCE_FABRIC_BUILD_ID_KEY = "com.crashlytics.android.build_id"
 
+  val ASSET_CRASHLYTICS_DEFAULT_VERSION_NAME = "0.1-SNAPSHOT"
+  val ASSET_CRASHLYTICS_DEFAULT_VERSION_CODE = "1"
   val ASSET_CRASHLYTICS_BUILD_DESC = "Auto-generated properties file for crashlytics"
   val ASSET_CRASHLYTICS_BUILD_FILENAME = "crashlytics-build.properties"
 
