@@ -4,7 +4,7 @@ val crashlytics = Project(id = "sbt-crashlytics", base = file("."))
 sbtPlugin := true
 
 // Dependency settings
-addSbtPlugin("org.scala-android" % "sbt-android" % "1.6.2")
+addSbtPlugin("org.scala-android" % "sbt-android" % "1.6.3")
 
 // Scripted testing settings
 ScriptedPlugin.scriptedSettings
