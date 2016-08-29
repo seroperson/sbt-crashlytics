@@ -4,21 +4,20 @@ object Constants {
 
   val DEPENDENCY_FABRIC_MAVEN = "https://maven.fabric.io/public"
   val DEPENDENCY_CRASHLYTICS_VERSION = "2.5.5"
-  val DEPENDENCY_CRASHLYTICS_CORE_VERSION = "2.3.8"
-  val DEPENDENCY_CRASHLYTICS_ANSWERS_VERSION = "1.3.6"
-  val DEPENDENCY_CRASHLYTICS_BETA_VERSION = "1.1.4"
-  val DEPENDENCY_FABRIC_VERSION = "1.3.10"
 
   val PROPERTIES_API_KEY_KEY = "fabric.apiKey"
   val PROPERTIES_API_SECRET_KEY = "fabric.apiSecret"
 
-  val MANIFEST_FABRIC_META_KEY = "io.fabric.ApiKey"
-
-  val RESOURCE_FABRIC_BUILD_ID_KEY = "com.crashlytics.android.build_id"
-
-  val ASSET_CRASHLYTICS_DEFAULT_VERSION_NAME = "0.1-SNAPSHOT"
-  val ASSET_CRASHLYTICS_DEFAULT_VERSION_CODE = "1"
+  val DEFAULT_VERSION_NAME = "0.0" // Like in AndroidBuildHandler
+  val DEFAULT_VERSION_CODE = 0
   val ASSET_CRASHLYTICS_BUILD_DESC = "Auto-generated properties file for crashlytics"
-  val ASSET_CRASHLYTICS_BUILD_FILENAME = "crashlytics-build.properties"
+
+  val API_HEADER_DEVELOPER_TOKEN = "ed8fc3dc68a7475cc970eb1e9c0cb6603b0a3ea2"
+  val API_BASE_ENDPOINT = "https://api.crashlytics.com"
+  val API_BASE_NOTES_FORMAT = s"$API_BASE_ENDPOINT/spi/v1/platforms/android/apps/%s/releases/%s/build_server/notes"
+  val API_DISTRIBUTION_ENDPOINT = "https://distribution-uploads.crashlytics.com"
+  val API_DISTRIBUTION_UPLOAD_FORMAT = s"$API_DISTRIBUTION_ENDPOINT/spi/v1/platforms/android/apps/%s/distributions"
+  val API_DISTRIBUTION_NOTIFY_TRUE = "true"
+  val API_DISTRIBUTION_NOTIFY_FALSE = "suppress" // ohgod
 
 }

@@ -5,6 +5,7 @@ sbtPlugin := true
 
 // Dependency settings
 addSbtPlugin("org.scala-android" % "sbt-android" % "1.6.3")
+libraryDependencies += "org.scalaj" %% "scalaj-http" % "2.3.0"
 
 // Scripted testing settings
 ScriptedPlugin.scriptedSettings

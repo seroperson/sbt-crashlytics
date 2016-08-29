@@ -1,34 +1,16 @@
 package crashlytics
 
-import java.io.File
-import java.util.Properties
-
 import android.Keys._
-import android.Resources.ANDROID_NS
 import sbt.Keys._
 import sbt._
-
-import scala.collection.JavaConverters._
-import scala.xml._
 
 // There is no way to use autoplugin with sbt-android
 object Crashlytics extends Plugin {
 
+  import java.util.Properties
+
   import Constants._
   import Keys._
-
-  object Dependency {
-    val crashlytics =
-      "com.crashlytics.sdk.android" % "crashlytics" % DEPENDENCY_CRASHLYTICS_VERSION intransitive
-    val crashlyticsCore =
-      "com.crashlytics.sdk.android" % "crashlytics-core" % DEPENDENCY_CRASHLYTICS_CORE_VERSION intransitive
-    val crashlyticsAnswers =
-      "com.crashlytics.sdk.android" % "answers" % DEPENDENCY_CRASHLYTICS_ANSWERS_VERSION intransitive
-    val crashlyticsBeta =
-      "com.crashlytics.sdk.android" % "beta" % DEPENDENCY_CRASHLYTICS_BETA_VERSION intransitive
-    val fabric =
-      "io.fabric.sdk.android" % "fabric" % DEPENDENCY_FABRIC_VERSION intransitive
-  }
 
   // There is 'io.fabric.tools % gradle' package with a lot of stuff that already implemented in,
   // but it's hard to use in result of couple of reasons.
@@ -36,36 +18,46 @@ object Crashlytics extends Plugin {
   lazy val crashlyticsBuild = Seq(
     fabricPropertiesFile := new File("local.properties"),
     crashlyticsProperties <<= fabricPropertiesFile { file =>
+      import scala.collection.JavaConverters._
+
       val prop = new Properties
       IO.load(prop, file)
       prop.asScala.toMap
     },
+
     fabricApiKey <<= crashlyticsProperties { _ getOrElse(PROPERTIES_API_KEY_KEY,
-      throw new IllegalStateException("You need to set fabric.apiKey property")) },
+      throw new MessageOnlyException("You need to set fabric.apiKey property")) },
+    // api secret isn't needed just for building application, so it's optional
     fabricApiSecret <<= crashlyticsProperties { _ get PROPERTIES_API_SECRET_KEY },
-    crashlyticsLibraries := {
-      import Dependency._
-      Seq(crashlytics, crashlyticsCore, crashlyticsAnswers, crashlyticsBeta, fabric)
-    },
+
+    // the library downloads all others as dependencies
+    crashlyticsLibraries := Seq("com.crashlytics.sdk.android" % "crashlytics" % DEPENDENCY_CRASHLYTICS_VERSION),
+
     // TODO it must be generated after each successful packaging
+    // XmlBuildWriter#updateBuildId
     crashlyticsBuildId := java.util.UUID.randomUUID.toString,
 
     // Adding fabric maven repository because there is nothing on mavencentral
     resolvers += "fabric" at DEPENDENCY_FABRIC_MAVEN,
 
-    // Adding the set of predefined crashlytics libraries
+    // Automatically adding crashlytics library dependency
     libraryDependencies <++= crashlyticsLibraries,
 
-    // Writing com.crashlytics.android.build_id value directly to values.xml
-    resValues <<= (crashlyticsBuildId, resValues) map { (id, seq) =>
-      seq :+("string", RESOURCE_FABRIC_BUILD_ID_KEY, id)
-    },
+    // todo looks shitty
+    crashlyticsUploadDistributionRelease <<= (packageRelease, applicationId, crashlyticsBuildId, versionName, versionCode,
+      fabricApiKey, fabricApiSecret, streams) map(uploadDistribution),
+    crashlyticsUploadDistributionDebug <<= (packageDebug, applicationId, crashlyticsBuildId, versionName, versionCode,
+      fabricApiKey, fabricApiSecret, streams) map(uploadDistribution),
 
-    // Instead of using io.fabric.tools apiKey manifest injection we inject it by own implementation
-    // Because we can inject it only if call resource generation again
+    // Writing com.crashlytics.android.build_id value directly to values.xml
+    resValues <<= (crashlyticsBuildId, resValues) map { (id, seq) => seq :+("string", "com.crashlytics.android.build_id", id) },
+
+    // Injecting apiKey into the manifest
     processManifest <<= (fabricApiKey, processManifest) map { (key, file) =>
+      import scala.xml._
+
       val xml = XML.loadFile(file)
-      val prefix = xml.scope.getPrefix(ANDROID_NS)
+      val prefix = xml.scope.getPrefix(android.Resources.ANDROID_NS)
       val application = xml \ "application"
       XML.save(
         filename = file.getAbsolutePath,
@@ -74,7 +66,7 @@ object Crashlytics extends Plugin {
             application.head.asInstanceOf[Elem].copy(
               child = application.head.child ++ new Elem(null, "meta-data", Null, TopScope, true) %
                 new PrefixedAttribute(prefix, "value", key, Null) %
-                new PrefixedAttribute(prefix, "name", MANIFEST_FABRIC_META_KEY, Null)))),
+                new PrefixedAttribute(prefix, "name", "io.fabric.ApiKey", Null)))),
         enc = "UTF-8",
         xmlDecl = true)
       file
@@ -87,10 +79,65 @@ object Crashlytics extends Plugin {
       Seq("app_name" -> name,
         "package_name" -> packageName,
         "build_id" -> id,
-        "version_name" -> verName.getOrElse(ASSET_CRASHLYTICS_DEFAULT_VERSION_NAME),
-        "version_code" -> verCode.getOrElse(ASSET_CRASHLYTICS_DEFAULT_VERSION_CODE).toString) foreach (v => prop.put(v._1, v._2))
-      IO.write(prop, ASSET_CRASHLYTICS_BUILD_DESC, assets / ASSET_CRASHLYTICS_BUILD_FILENAME)
+        "version_name" -> verName.getOrElse(DEFAULT_VERSION_NAME),
+        "version_code" -> verCode.getOrElse(DEFAULT_VERSION_CODE).toString) foreach (v => prop.put(v._1, v._2))
+      IO.write(prop, ASSET_CRASHLYTICS_BUILD_DESC, assets / "crashlytics-build.properties")
       v
     })
+
+  // DistributionTasks#uploadDistribution
+  private def uploadDistribution(apk: File, packageName: String, id: String,
+                                 verName: Option[String], verCode: Option[Int],
+                                 apiKey: String, apiSecret: Option[String], streams: TaskStreams) {
+    import java.nio.file.Files
+    import java.util.concurrent.TimeUnit.{NANOSECONDS, SECONDS}
+    import scalaj.http.{Http, MultiPart}
+    import scalaj.http.{HttpRequest, HttpResponse}
+
+    val unrolledSecret = apiSecret.getOrElse(throw new MessageOnlyException("You must specify fabric.apiSecret before distribution uploading"))
+    implicit class RichRequest(req: HttpRequest) {
+      def crashlyticsHeaders() = req.headers(
+        "User-Agent" -> s"Crashlytics Gradle Plugin for ${System.getProperty("os.name")} / 1.21.7", // =)
+        "X-CRASHLYTICS-API-KEY" -> apiKey,
+        "X-CRASHLYTICS-BUILD-SECRET" -> unrolledSecret,
+        // have no idea what is it and why it's const, but things are not working without this header
+        "X-CRASHLYTICS-DEVELOPER-TOKEN" -> API_HEADER_DEVELOPER_TOKEN)
+      def doIfSucceeded(f: HttpResponse[String] => Unit) { f.apply(req.asString.throwError) }
+    }
+    val log = streams.log
+    val noteUrl = API_BASE_NOTES_FORMAT.format(packageName, id)
+    log.info(s"Sending release notes ...")
+    log.debug(s"Requested note url: ${noteUrl}")
+    val displayVersion = verName.getOrElse(DEFAULT_VERSION_NAME)
+    val buildVersion = verCode.getOrElse(DEFAULT_VERSION_CODE).toString
+    // RestfulWebApi#performSetReleaseNotes
+    Http(noteUrl).crashlyticsHeaders()
+      .postForm(Seq("app[display_version]" -> displayVersion,
+        "app[build_version]" -> buildVersion,
+        // 'markdown' is also available, but seems like it doesn't make any difference
+        "release_notes[format]" -> "text",
+        "release_notes[body]" -> "some bodt"))
+      .method("PUT")
+      .doIfSucceeded(r => {
+        def stringPart(v: (String, String)) = MultiPart(v._1, v._1, "text/plain", v._2)
+        log.debug(s"Release notes updated successfully (${r.code} / ${r.body})")
+        val distributionUrl = API_DISTRIBUTION_UPLOAD_FORMAT.format(packageName)
+        log.info(s"Sending apk distribution ...") // todo add 'progressbar'
+        log.debug(s"Requested distribution url: ${distributionUrl}")
+        // RestfulWebApi#createDistribution
+        Http(distributionUrl).crashlyticsHeaders()
+          // i think there is a lot of redundant parts, but gradle plugin does so
+          .postMulti(MultiPart("distribution[file]", apk.getName, "application/octet-stream", Files.readAllBytes(apk.toPath)),
+            stringPart("send_notifications" -> API_DISTRIBUTION_NOTIFY_TRUE),
+            stringPart("distribution[built_at]" -> SECONDS.convert(System.nanoTime(), NANOSECONDS).toString),
+            stringPart("app[instance_identifier]" -> id), // build_id
+            stringPart("app[display_version]" -> displayVersion),
+            stringPart("app[build_version]" -> buildVersion),
+            stringPart("app[type]" -> "android_app"), // never changes
+            stringPart("app[slices][][arch]" -> "java"), // it's too
+            stringPart("app[slices][][uuid]" -> id)) // similar to instance_identifier
+          .doIfSucceeded(r => { log.debug(s"Upload succeeded (${r.code} / ${r.body})") })
+      })
+  }
 
 }

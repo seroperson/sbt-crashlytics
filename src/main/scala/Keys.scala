@@ -11,6 +11,9 @@ object Keys {
   val fabricApiSecret = settingKey[Option[String]]("API Secret for the project")
   val crashlyticsLibraries = settingKey[Seq[ModuleID]]("By default there is the set of crashlytics libraries that will be added after settings applied. Overwrite if you need to change library version or something else")
   val crashlyticsBuildId = settingKey[String]("Build ID to determine any build")
+  // Names according to gradle plugin
+  val crashlyticsUploadDistributionDebug = taskKey[Unit]("Upload debug apk file to Crashlytics Beta")
+  val crashlyticsUploadDistributionRelease = taskKey[Unit]("Upload release apk file to Crashlytics Beta")
 
   private[crashlytics] val crashlyticsProperties = settingKey[Map[String, String]]("Properties loaded from propertiesFile")
 
