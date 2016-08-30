@@ -12,6 +12,8 @@ object Crashlytics extends Plugin {
   import Constants._
   import Keys._
 
+  private def fail(m: String) = throw new MessageOnlyException(m)
+
   // There is 'io.fabric.tools % gradle' package with a lot of stuff that already implemented in,
   // but it's hard to use in result of couple of reasons.
 
@@ -25,12 +27,11 @@ object Crashlytics extends Plugin {
       prop.asScala.toMap
     },
 
-    fabricApiKey <<= crashlyticsProperties { _ getOrElse(PROPERTIES_API_KEY_KEY,
-      throw new MessageOnlyException("You need to set fabric.apiKey property")) },
-    // api secret isn't needed just for building application, so it's optional
+    fabricApiKey <<= crashlyticsProperties { _ getOrElse(PROPERTIES_API_KEY_KEY, fail("You need to set fabric.apiKey property")) },
+    // Api secret isn't needed just for building application, so it's optional
     fabricApiSecret <<= crashlyticsProperties { _ get PROPERTIES_API_SECRET_KEY },
 
-    // the library downloads all others as dependencies
+    // The following library downloads all others as dependencies (beta, answers etc ...)
     crashlyticsLibraries := Seq("com.crashlytics.sdk.android" % "crashlytics" % DEPENDENCY_CRASHLYTICS_VERSION),
 
     // TODO it must be generated after each successful packaging
@@ -45,9 +46,12 @@ object Crashlytics extends Plugin {
 
     // todo looks shitty
     crashlyticsUploadDistributionRelease <<= (packageRelease, applicationId, crashlyticsBuildId, versionName, versionCode,
-      fabricApiKey, fabricApiSecret, streams) map(uploadDistribution),
+      fabricApiKey, fabricApiSecret, crashlyticsReleaseNotesEditor, streams) map(uploadDistribution),
     crashlyticsUploadDistributionDebug <<= (packageDebug, applicationId, crashlyticsBuildId, versionName, versionCode,
-      fabricApiKey, fabricApiSecret, streams) map(uploadDistribution),
+      fabricApiKey, fabricApiSecret, crashlyticsReleaseNotesEditor, streams) map(uploadDistribution),
+
+    // Or redefine the key to enforce some editor for all project members
+    crashlyticsReleaseNotesEditor := { () => sys.env.get("EDITOR").getOrElse(fail("Set $EDITOR env variable to edit the release notes")) },
 
     // Writing com.crashlytics.android.build_id value directly to values.xml
     resValues <<= (crashlyticsBuildId, resValues) map { (id, seq) => seq :+("string", "com.crashlytics.android.build_id", id) },
@@ -88,16 +92,21 @@ object Crashlytics extends Plugin {
   // DistributionTasks#uploadDistribution
   private def uploadDistribution(apk: File, packageName: String, id: String,
                                  verName: Option[String], verCode: Option[Int],
-                                 apiKey: String, apiSecret: Option[String], streams: TaskStreams) {
+                                 apiKey: String, apiSecret: Option[String], editor: () => String,
+                                 streams: TaskStreams) {
+    import java.lang.System._
     import java.nio.file.Files
     import java.util.concurrent.TimeUnit.{NANOSECONDS, SECONDS}
     import scalaj.http.{Http, MultiPart}
     import scalaj.http.{HttpRequest, HttpResponse}
+    import sbt.IO._
 
-    val unrolledSecret = apiSecret.getOrElse(throw new MessageOnlyException("You must specify fabric.apiSecret before distribution uploading"))
+    val unrolledSecret = apiSecret.getOrElse(fail("You must specify fabric.apiSecret before distribution uploading"))
+    // todo apk sign check
     implicit class RichRequest(req: HttpRequest) {
       def crashlyticsHeaders() = req.headers(
-        "User-Agent" -> s"Crashlytics Gradle Plugin for ${System.getProperty("os.name")} / 1.21.7", // =)
+        // todo move to constants.scala
+        "User-Agent" -> s"Crashlytics Gradle Plugin for ${Option(getProperty("os.name")).getOrElse("unknown os")} / 1.21.7", // =)
         "X-CRASHLYTICS-API-KEY" -> apiKey,
         "X-CRASHLYTICS-BUILD-SECRET" -> unrolledSecret,
         // have no idea what is it and why it's const, but things are not working without this header
@@ -106,7 +115,6 @@ object Crashlytics extends Plugin {
     }
     val log = streams.log
     val noteUrl = API_BASE_NOTES_FORMAT.format(packageName, id)
-    log.info(s"Sending release notes ...")
     log.debug(s"Requested note url: ${noteUrl}")
     val displayVersion = verName.getOrElse(DEFAULT_VERSION_NAME)
     val buildVersion = verCode.getOrElse(DEFAULT_VERSION_CODE).toString
@@ -116,7 +124,17 @@ object Crashlytics extends Plugin {
         "app[build_version]" -> buildVersion,
         // 'markdown' is also available, but seems like it doesn't make any difference
         "release_notes[format]" -> "text",
-        "release_notes[body]" -> "some bodt"))
+        "release_notes[body]" -> withTemporaryFile("crashlytics_note_", "") { file =>
+          write(file, NOTES_DESCRIPTION_MESSAGE_FORMAT.format(displayVersion))
+          if(Process(Seq(editor(), file.getCanonicalPath)).!< == 0) {
+            log.info("Sending release notes:")
+            readLines(file).foldLeft(StringBuilder.newBuilder)((b, l) => {
+              log.info(l)
+              b.append(s"\n$l")
+            }).tail.toString()
+          }
+          else { fail("Notes aren't saved, editor finished with non-zero code.") }
+        }))
       .method("PUT")
       .doIfSucceeded(r => {
         def stringPart(v: (String, String)) = MultiPart(v._1, v._1, "text/plain", v._2)
@@ -129,7 +147,7 @@ object Crashlytics extends Plugin {
           // i think there is a lot of redundant parts, but gradle plugin does so
           .postMulti(MultiPart("distribution[file]", apk.getName, "application/octet-stream", Files.readAllBytes(apk.toPath)),
             stringPart("send_notifications" -> API_DISTRIBUTION_NOTIFY_TRUE),
-            stringPart("distribution[built_at]" -> SECONDS.convert(System.nanoTime(), NANOSECONDS).toString),
+            stringPart("distribution[built_at]" -> SECONDS.convert(nanoTime(), NANOSECONDS).toString),
             stringPart("app[instance_identifier]" -> id), // build_id
             stringPart("app[display_version]" -> displayVersion),
             stringPart("app[build_version]" -> buildVersion),

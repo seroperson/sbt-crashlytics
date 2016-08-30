@@ -12,6 +12,8 @@ object Constants {
   val DEFAULT_VERSION_CODE = 0
   val ASSET_CRASHLYTICS_BUILD_DESC = "Auto-generated properties file for crashlytics"
 
+  val NOTES_DESCRIPTION_MESSAGE_FORMAT = "Write and save here any notes about current release (%s)"
+
   val API_HEADER_DEVELOPER_TOKEN = "ed8fc3dc68a7475cc970eb1e9c0cb6603b0a3ea2"
   val API_BASE_ENDPOINT = "https://api.crashlytics.com"
   val API_BASE_NOTES_FORMAT = s"$API_BASE_ENDPOINT/spi/v1/platforms/android/apps/%s/releases/%s/build_server/notes"
