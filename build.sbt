@@ -18,5 +18,6 @@ licenses := Seq("MIT" -> url("http://www.opensource.org/licenses/MIT"))
 version := "0.2"
 
 publishMavenStyle := false
+bintrayReleaseOnPublish := false
 bintrayOrganization := None
 bintrayVcsUrl := Some("https://github.com/seroperson/sbt-crashlytics")
