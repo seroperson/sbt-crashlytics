@@ -14,7 +14,7 @@ object Keys {
   // Names according to gradle plugin
   val crashlyticsUploadDistributionDebug = taskKey[Unit]("Upload debug apk file to Crashlytics Beta")
   val crashlyticsUploadDistributionRelease = taskKey[Unit]("Upload release apk file to Crashlytics Beta")
-  val crashlyticsReleaseNotesEditor = taskKey[() => String]("Function that returns preferable text editor for writing release notes")
+  val crashlyticsReleaseNotesCreator = taskKey[(String) => String]("Function that returns release notes for the given version")
 
   private[crashlytics] val crashlyticsProperties = settingKey[Map[String, String]]("Properties loaded from propertiesFile")
 
