@@ -2,7 +2,8 @@ Description
 ===========
 sbt-crashlytics - it's a sbt plugin that helps you to get deal with [crashlytics](https://fabric.io/kits/android/crashlytics/)
 and [sbt-android](https://github.com/scala-android/sbt-android). For now this plugin
-just do initializing configuration to build working application that uses crashlytics.
+just does some preparations to make crashlytics works and provides initial support
+for uploading distributions to beta.
 
 Usage
 =====
