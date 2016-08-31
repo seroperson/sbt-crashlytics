@@ -51,26 +51,19 @@ object Crashlytics extends Plugin {
       fabricApiKey, fabricApiSecret, crashlyticsReleaseNotesCreator, streams) map(uploadDistribution),
 
     // Or redefine the key to enforce some editor for all project members
-    crashlyticsReleaseNotesCreator <<= (streams) map { streams =>
+    crashlyticsReleaseNotesCreator := (version => { // todo return just f0?
       import sbt.IO._
 
-      val log = streams.log
-      version => { // todo or just return f0?
-        withTemporaryFile("crashlytics_note_", "") { file =>
-          write(file, NOTES_DESCRIPTION_MESSAGE_FORMAT.format(version))
-          if(Process(Seq(sys.env.get("EDITOR").getOrElse(fail("Set $EDITOR env variable to edit the release notes")), file.getCanonicalPath)).!< == 0) {
-            log.info("Sending release notes:")
-            readLines(file).foldLeft(StringBuilder.newBuilder)((b, l) => {
-              log.info(l)
-              b.append(s"\n$l")
-            }).tail.toString()
-          }
-          else {
-            fail("Notes aren't saved, editor finished with non-zero code.")
-          }
+      withTemporaryFile("crashlytics_note_", "") { file =>
+        write(file, NOTES_DESCRIPTION_MESSAGE_FORMAT.format(version))
+        if(Process(Seq(sys.env.get("EDITOR").getOrElse(fail("Set $EDITOR env variable to edit the release notes")), file.getCanonicalPath)).!< == 0) {
+          readLines(file).foldLeft(StringBuilder.newBuilder)((b, l) => b.append(s"\n$l")).tail.toString()
+        }
+        else {
+          fail("Notes aren't saved, editor finished with non-zero code.")
         }
       }
-    },
+    }),
 
     // Writing com.crashlytics.android.build_id value directly to values.xml
     resValues <<= (crashlyticsBuildId, resValues) map { (id, seq) => seq :+("string", "com.crashlytics.android.build_id", id) },
@@ -116,8 +109,8 @@ object Crashlytics extends Plugin {
     import java.lang.System._
     import java.nio.file.Files
     import java.util.concurrent.TimeUnit.{NANOSECONDS, SECONDS}
-    import scalaj.http.{Http, MultiPart}
-    import scalaj.http.{HttpRequest, HttpResponse}
+
+    import scalaj.http.{Http, HttpRequest, HttpResponse, MultiPart}
 
     val unrolledSecret = apiSecret.getOrElse(fail("You must specify fabric.apiSecret before distribution uploading"))
     // todo apk sign check
@@ -136,13 +129,16 @@ object Crashlytics extends Plugin {
     log.debug(s"Requested note url: ${noteUrl}")
     val displayVersion = verName.getOrElse(DEFAULT_VERSION_NAME)
     val buildVersion = verCode.getOrElse(DEFAULT_VERSION_CODE).toString
+    val notesText = editor(displayVersion)
+    log.info("Sending release notes:")
+    notesText.split('\n').foreach(v => log.info(' ' + v)) // brr
     // RestfulWebApi#performSetReleaseNotes
     Http(noteUrl).crashlyticsHeaders()
       .postForm(Seq("app[display_version]" -> displayVersion,
         "app[build_version]" -> buildVersion,
         // 'markdown' is also available, but seems like it doesn't make any difference
         "release_notes[format]" -> "text",
-        "release_notes[body]" -> editor(displayVersion)))
+        "release_notes[body]" -> notesText))
       .method("PUT")
       .doIfSucceeded(r => {
         def stringPart(v: (String, String)) = MultiPart(v._1, v._1, "text/plain", v._2)
