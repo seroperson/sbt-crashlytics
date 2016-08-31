@@ -1,16 +1,20 @@
 Description
 ===========
-sbt-crashlytics - it's a sbt plugin that helps you to get deal with [crashlytics](https://fabric.io/kits/android/crashlytics/) and [sbt-android](https://github.com/scala-android/sbt-android). For now this plugin just do initializing configuration to build working application that uses crashlytics.
+sbt-crashlytics - it's a sbt plugin that helps you to get deal with [crashlytics](https://fabric.io/kits/android/crashlytics/)
+and [sbt-android](https://github.com/scala-android/sbt-android). For now this plugin
+just do initializing configuration to build working application that uses crashlytics.
 
 Usage
 =====
-First of all, you need to include your [api key](https://fabric.io/settings/organizations/) in **local.properties** (by default):
+First of all, you need to include your [api key](https://fabric.io/settings/organizations/)
+into the **local.properties** (by default):
 
 ```scala
 fabric.apiKey=my-api-key
 ```
 
-Now the action goes to **build.sbt** where you need to apply crashlytics settings to your android project:
+Now the action goes to **build.sbt** where you need to apply crashlytics settings to
+your android project:
 
 ```scala
 androidBuild
@@ -21,15 +25,35 @@ platformSdk := "android-23"
 crashlyticsBuild
 ```
 
-And add the crashlytics sdk dependency (like any other library - via libraryDependencies key).
-Basically it's all what you need.
+Crashlytics dependency will be added automatically.
+So, that is basically all what you need.
+
+Tips
+====
+While uploading apk to beta, you need to write release notes. By default, `$EDITOR`
+will be opened for this stuff. But if you too lazy for writing it by yourself, you can
+redefine `crashlyticsReleaseNotesCreator` key to implement automatic generation.
+For example, you want to post your commit history since last tag along with distribution.
+It will be like that (*code isn't excellent and it's here just to show you how
+flexible is the feature*):
+
+```scala
+crashlyticsReleaseNotesCreator := (v => {
+  import scala.util.{Success, Try}
+
+  Process(Seq("git", "log", "--oneline", (Try(Process(Seq("git", "describe", "--abbrev=0", "--tags")).!!) match {
+    case Success(v) => s"$v.."
+    case _ => ""
+  }) + "HEAD")).lines.mkString("\n")
+})
+```
 
 Download
 ========
 Just include the following line in your **project/plugins.sbt**
 
 ```scala
-addSbtPlugin("com.seroperson" % "sbt-crashlytics" % "0.1")
+addSbtPlugin("com.seroperson" % "sbt-crashlytics" % "0.2")
 ```
 
 Be sure that you also included the latest version of sbt-android plugin.
