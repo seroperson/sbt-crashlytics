@@ -5,7 +5,6 @@ import crashlytics.Keys._
 crashlyticsBuild
 fabricApiKey := "no-key"
 
-import android.Keys._
 import scala.xml.XML.loadFile
 TaskKey[Unit]("check-injected-api-key") <<= (projectLayout, outputLayout, fabricApiKey) map { (layout, converter, key) =>
   val metadata = (loadFile(converter.apply(layout).processedManifest) \ "application" \ "meta-data").head

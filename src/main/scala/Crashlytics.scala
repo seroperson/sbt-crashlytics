@@ -4,102 +4,107 @@ import android.Keys._
 import sbt.Keys._
 import sbt._
 
-// There is no way to use autoplugin with sbt-android
-object Crashlytics extends Plugin {
+object Crashlytics extends AutoPlugin {
 
   import java.util.Properties
 
   import Constants._
   import Keys._
 
-  private def fail(m: String) = throw new MessageOnlyException(m)
-
   // There is 'io.fabric.tools % gradle' package with a lot of stuff that already implemented in,
   // but it's hard to use in result of couple of reasons.
 
-  lazy val crashlyticsBuild = Seq(
-    fabricPropertiesFile := new File("local.properties"),
-    crashlyticsProperties <<= fabricPropertiesFile { file =>
-      import scala.collection.JavaConverters._
+  override def trigger = allRequirements
+  override def requires = android.AndroidPlugin
 
-      val prop = new Properties
-      IO.load(prop, file)
-      prop.asScala.toMap
-    },
+  object autoImport {
+    val crashlyticsBuild = Seq(
+      fabricPropertiesFile := new File("local.properties"),
+      crashlyticsProperties <<= fabricPropertiesFile { file =>
+        import scala.collection.JavaConverters._
 
-    fabricApiKey <<= crashlyticsProperties { _ getOrElse(PROPERTIES_API_KEY_KEY, fail("You need to set fabric.apiKey property")) },
-    // Api secret isn't needed just for building application, so it's optional
-    fabricApiSecret <<= crashlyticsProperties { _ get PROPERTIES_API_SECRET_KEY },
+        val prop = new Properties
+        IO.load(prop, file)
+        prop.asScala.toMap
+      },
 
-    // The following library downloads all others as dependencies (beta, answers etc ...)
-    crashlyticsLibraries := Seq("com.crashlytics.sdk.android" % "crashlytics" % DEPENDENCY_CRASHLYTICS_VERSION),
+      fabricApiKey <<= crashlyticsProperties { _ getOrElse(PROPERTIES_API_KEY_KEY, fail("You need to set fabric.apiKey property")) },
+      // Api secret isn't needed just for building application, so it's optional
+      fabricApiSecret <<= crashlyticsProperties { _ get PROPERTIES_API_SECRET_KEY },
 
-    // TODO it must be generated after each successful packaging
-    // XmlBuildWriter#updateBuildId
-    crashlyticsBuildId := java.util.UUID.randomUUID.toString,
+      // The following library downloads all others as dependencies (beta, answers etc ...)
+      crashlyticsLibraries := Seq("com.crashlytics.sdk.android" % "crashlytics" % DEPENDENCY_CRASHLYTICS_VERSION),
 
-    // Adding fabric maven repository because there is nothing on mavencentral
-    resolvers += "fabric" at DEPENDENCY_FABRIC_MAVEN,
+      // TODO it must be generated after each successful packaging
+      // XmlBuildWriter#updateBuildId
+      crashlyticsBuildId := java.util.UUID.randomUUID.toString,
 
-    // Automatically adding crashlytics library dependency
-    libraryDependencies <++= crashlyticsLibraries,
+      // Adding fabric maven repository because there is nothing on mavencentral
+      resolvers += "fabric" at DEPENDENCY_FABRIC_MAVEN,
 
-    // todo looks shitty
-    crashlyticsUploadDistributionRelease <<= (packageRelease, applicationId, crashlyticsBuildId, versionName, versionCode,
-      fabricApiKey, fabricApiSecret, crashlyticsReleaseNotesCreator, streams) map(uploadDistribution),
-    crashlyticsUploadDistributionDebug <<= (packageDebug, applicationId, crashlyticsBuildId, versionName, versionCode,
-      fabricApiKey, fabricApiSecret, crashlyticsReleaseNotesCreator, streams) map(uploadDistribution),
+      // Automatically adding crashlytics library dependency
+      libraryDependencies <++= crashlyticsLibraries,
 
-    // Or redefine the key to enforce some editor for all project members
-    crashlyticsReleaseNotesCreator := (version => { // todo return just f0?
-      import sbt.IO._
+      // todo looks shitty
+      crashlyticsUploadDistributionRelease <<= (packageRelease, applicationId, crashlyticsBuildId, versionName, versionCode,
+        fabricApiKey, fabricApiSecret, crashlyticsReleaseNotesCreator, streams) map (uploadDistribution),
+      crashlyticsUploadDistributionDebug <<= (packageDebug, applicationId, crashlyticsBuildId, versionName, versionCode,
+        fabricApiKey, fabricApiSecret, crashlyticsReleaseNotesCreator, streams) map (uploadDistribution),
 
-      withTemporaryFile("crashlytics_note_", "") { file =>
-        write(file, NOTES_DESCRIPTION_MESSAGE_FORMAT.format(version))
-        if(Process(Seq(sys.env.get("EDITOR").getOrElse(fail("Set $EDITOR env variable to edit the release notes")), file.getCanonicalPath)).!< == 0) {
-          readLines(file).foldLeft(StringBuilder.newBuilder)((b, l) => b.append(s"\n$l")).tail.toString()
+      // Or redefine the key to enforce some editor for all project members
+      crashlyticsReleaseNotesCreator := (version => {
+        // todo return just f0?
+        import sbt.IO._
+
+        withTemporaryFile("crashlytics_note_", "") { file =>
+          write(file, NOTES_DESCRIPTION_MESSAGE_FORMAT.format(version))
+          if (Process(Seq(sys.env.get("EDITOR").getOrElse(fail("Set $EDITOR env variable to edit the release notes")), file.getCanonicalPath)).!< == 0) {
+            readLines(file).foldLeft(StringBuilder.newBuilder)((b, l) => b.append(s"\n$l")).tail.toString()
+          }
+          else {
+            fail("Notes aren't saved, editor finished with non-zero code.")
+          }
         }
-        else {
-          fail("Notes aren't saved, editor finished with non-zero code.")
-        }
-      }
-    }),
+      }),
 
-    // Writing com.crashlytics.android.build_id value directly to values.xml
-    resValues <<= (crashlyticsBuildId, resValues) map { (id, seq) => seq :+("string", "com.crashlytics.android.build_id", id) },
+      // Writing com.crashlytics.android.build_id value directly to values.xml
+      resValues <<= (crashlyticsBuildId, resValues) map { (id, seq) => seq :+ ("string", "com.crashlytics.android.build_id", id) },
 
-    // Injecting apiKey into the manifest
-    processManifest <<= (fabricApiKey, processManifest) map { (key, file) =>
-      import scala.xml._
+      // Injecting apiKey into the manifest
+      processManifest <<= (fabricApiKey, processManifest) map { (key, file) =>
+        import scala.xml._
 
-      val xml = XML.loadFile(file)
-      val prefix = xml.scope.getPrefix(android.Resources.ANDROID_NS)
-      val application = xml \ "application"
-      XML.save(
-        filename = file.getAbsolutePath,
-        node = xml.copy(
-          child = xml.child.updated(xml.child.indexOf(application.head),
-            application.head.asInstanceOf[Elem].copy(
-              child = application.head.child ++ new Elem(null, "meta-data", Null, TopScope, true) %
-                new PrefixedAttribute(prefix, "value", key, Null) %
-                new PrefixedAttribute(prefix, "name", "io.fabric.ApiKey", Null)))),
-        enc = "UTF-8",
-        xmlDecl = true)
-      file
-    },
+        val xml = XML.loadFile(file)
+        val prefix = xml.scope.getPrefix(android.Resources.ANDROID_NS)
+        val application = xml \ "application"
+        XML.save(
+          filename = file.getAbsolutePath,
+          node = xml.copy(
+            child = xml.child.updated(xml.child.indexOf(application.head),
+              application.head.asInstanceOf[Elem].copy(
+                child = application.head.child ++ new Elem(null, "meta-data", Null, TopScope, true) %
+                  new PrefixedAttribute(prefix, "value", key, Null) %
+                  new PrefixedAttribute(prefix, "name", "io.fabric.ApiKey", Null)))),
+          enc = "UTF-8",
+          xmlDecl = true)
+        file
+      },
 
-    // Generate crashlytics-build.properties
-    collectResources <<= (name, applicationId, crashlyticsBuildId, versionName, versionCode, collectResources) map { (name, packageName, id, verName, verCode, v) =>
-      val assets = v._1
-      val prop = new Properties
-      Seq("app_name" -> name,
-        "package_name" -> packageName,
-        "build_id" -> id,
-        "version_name" -> verName.getOrElse(DEFAULT_VERSION_NAME),
-        "version_code" -> verCode.getOrElse(DEFAULT_VERSION_CODE).toString) foreach (v => prop.put(v._1, v._2))
-      IO.write(prop, ASSET_CRASHLYTICS_BUILD_DESC, assets / "crashlytics-build.properties")
-      v
-    })
+      // Generate crashlytics-build.properties
+      collectResources <<= (name, applicationId, crashlyticsBuildId, versionName, versionCode, collectResources) map { (name, packageName, id, verName, verCode, v) =>
+        val assets = v._1
+        val prop = new Properties
+        Seq("app_name" -> name,
+          "package_name" -> packageName,
+          "build_id" -> id,
+          "version_name" -> verName.getOrElse(DEFAULT_VERSION_NAME),
+          "version_code" -> verCode.getOrElse(DEFAULT_VERSION_CODE).toString) foreach (v => prop.put(v._1, v._2))
+        IO.write(prop, ASSET_CRASHLYTICS_BUILD_DESC, assets / "crashlytics-build.properties")
+        v
+      })
+  }
+
+  private def fail(m: String) = throw new MessageOnlyException(m)
 
   // DistributionTasks#uploadDistribution
   private def uploadDistribution(apk: File, packageName: String, id: String,
@@ -161,5 +166,4 @@ object Crashlytics extends Plugin {
           .doIfSucceeded(r => { log.debug(s"Upload succeeded (${r.code} / ${r.body})") })
       })
   }
-
 }
