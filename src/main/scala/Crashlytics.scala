@@ -10,6 +10,7 @@ object Crashlytics extends AutoPlugin {
 
   import Constants._
   import Keys._
+  import okhttp3._
 
   // There is 'io.fabric.tools % gradle' package with a lot of stuff that already implemented in,
   // but it's hard to use in result of couple of reasons.
@@ -19,10 +20,10 @@ object Crashlytics extends AutoPlugin {
 
   object autoImport {
     val crashlyticsBuild = Seq(
+      crashlyticsOkHttpClient := new OkHttpClient(),
       fabricPropertiesFile := new File("local.properties"),
       crashlyticsProperties <<= fabricPropertiesFile { file =>
         import scala.collection.JavaConverters._
-
         val prop = new Properties
         IO.load(prop, file)
         prop.asScala.toMap
@@ -45,15 +46,18 @@ object Crashlytics extends AutoPlugin {
       // Automatically adding crashlytics library dependency
       libraryDependencies <++= crashlyticsLibraries,
 
+      // Upload deobs file immediately after proguard task
+      proguard <<= (proguard, projectLayout, outputLayout, versionName, versionCode, fabricApiKey, crashlyticsBuildId,
+        applicationId, streams, crashlyticsOkHttpClient) map (Api.uploadMapping),
+
       // todo looks shitty
       crashlyticsUploadDistributionRelease <<= (packageRelease, applicationId, crashlyticsBuildId, versionName, versionCode,
-        fabricApiKey, fabricApiSecret, crashlyticsReleaseNotesCreator, streams) map (uploadDistribution),
+        fabricApiKey, fabricApiSecret, crashlyticsReleaseNotesCreator, streams, crashlyticsOkHttpClient) map (Api.uploadDistribution),
       crashlyticsUploadDistributionDebug <<= (packageDebug, applicationId, crashlyticsBuildId, versionName, versionCode,
-        fabricApiKey, fabricApiSecret, crashlyticsReleaseNotesCreator, streams) map (uploadDistribution),
+        fabricApiKey, fabricApiSecret, crashlyticsReleaseNotesCreator, streams, crashlyticsOkHttpClient) map (Api.uploadDistribution),
 
       // Or redefine the key to enforce some editor for all project members
-      crashlyticsReleaseNotesCreator := (version => {
-        // todo return just f0?
+      crashlyticsReleaseNotesCreator := (version => { // todo return just f0?
         import sbt.IO._
 
         withTemporaryFile("crashlytics_note_", "") { file =>
@@ -106,64 +110,119 @@ object Crashlytics extends AutoPlugin {
 
   private def fail(m: String) = throw new MessageOnlyException(m)
 
-  // DistributionTasks#uploadDistribution
-  private def uploadDistribution(apk: File, packageName: String, id: String,
-                                 verName: Option[String], verCode: Option[Int],
-                                 apiKey: String, apiSecret: Option[String], editor: (String) => String,
-                                 streams: TaskStreams) {
-    import java.lang.System._
-    import java.nio.file.Files
-    import java.util.concurrent.TimeUnit.{NANOSECONDS, SECONDS}
+  private[this] object Api {
+    import java.io.{BufferedOutputStream, File, FileOutputStream}
 
-    import scalaj.http.{Http, HttpRequest, HttpResponse, MultiPart}
+    import okhttp3.MultipartBody.FORM
+    import okhttp3.MultipartBody.Part.createFormData
+    import okhttp3.RequestBody.create
 
-    val unrolledSecret = apiSecret.getOrElse(fail("You must specify fabric.apiSecret before distribution uploading"))
-    // todo apk sign check
-    implicit class RichRequest(req: HttpRequest) {
-      def crashlyticsHeaders() = req.headers(
-        // todo move to constants.scala
-        "User-Agent" -> s"Crashlytics Gradle Plugin for ${Option(getProperty("os.name")).getOrElse("unknown os")} / 1.21.7", // =)
+    private implicit class RichRequest(req: Request.Builder) {
+      import scala.collection.JavaConversions._
+      def crashlyticsHeaders(apiKey: String) = req.headers(Headers.of(Map(
         "X-CRASHLYTICS-API-KEY" -> apiKey,
-        "X-CRASHLYTICS-BUILD-SECRET" -> unrolledSecret,
         // have no idea what is it and why it's const, but things are not working without this header
-        "X-CRASHLYTICS-DEVELOPER-TOKEN" -> API_HEADER_DEVELOPER_TOKEN)
-      def doIfSucceeded(f: HttpResponse[String] => Unit) { f.apply(req.asString.throwError) }
+        "X-CRASHLYTICS-DEVELOPER-TOKEN" -> API_HEADER_DEVELOPER_TOKEN)))
+      def crashlyticsHeaders(apiKey: String, apiSecret: String): Request.Builder = crashlyticsHeaders(apiKey).header("X-CRASHLYTICS-BUILD-SECRET", apiSecret)
     }
-    val log = streams.log
-    val noteUrl = API_BASE_NOTES_FORMAT.format(packageName, id)
-    log.debug(s"Requested note url: ${noteUrl}")
-    val displayVersion = verName.getOrElse(DEFAULT_VERSION_NAME)
-    val buildVersion = verCode.getOrElse(DEFAULT_VERSION_CODE).toString
-    val notesText = editor(displayVersion)
-    log.info("Sending release notes:")
-    notesText.split('\n').foreach(v => log.info(' ' + v)) // brr
-    // RestfulWebApi#performSetReleaseNotes
-    Http(noteUrl).crashlyticsHeaders()
-      .postForm(Seq("app[display_version]" -> displayVersion,
-        "app[build_version]" -> buildVersion,
-        // 'markdown' is also available, but seems like it doesn't make any difference
-        "release_notes[format]" -> "text",
-        "release_notes[body]" -> notesText))
-      .method("PUT")
-      .doIfSucceeded(r => {
-        def stringPart(v: (String, String)) = MultiPart(v._1, v._1, "text/plain", v._2)
-        log.debug(s"Release notes updated successfully (${r.code} / ${r.body})")
-        val distributionUrl = API_DISTRIBUTION_UPLOAD_FORMAT.format(packageName)
-        log.info(s"Sending apk distribution ...") // todo add 'progressbar'
-        log.debug(s"Requested distribution url: ${distributionUrl}")
-        // RestfulWebApi#createDistribution
-        Http(distributionUrl).crashlyticsHeaders()
-          // i think there is a lot of redundant parts, but gradle plugin does so
-          .postMulti(MultiPart("distribution[file]", apk.getName, "application/octet-stream", Files.readAllBytes(apk.toPath)),
-            stringPart("send_notifications" -> API_DISTRIBUTION_NOTIFY_TRUE),
-            stringPart("distribution[built_at]" -> SECONDS.convert(nanoTime(), NANOSECONDS).toString),
-            stringPart("app[instance_identifier]" -> id), // build_id
-            stringPart("app[display_version]" -> displayVersion),
-            stringPart("app[build_version]" -> buildVersion),
-            stringPart("app[type]" -> "android_app"), // never changes
-            stringPart("app[slices][][arch]" -> "java"), // it's too
-            stringPart("app[slices][][uuid]" -> id)) // similar to instance_identifier
-          .doIfSucceeded(r => { log.debug(s"Upload succeeded (${r.code} / ${r.body})") })
-      })
+    private implicit class RichResponse(res: Response) {
+      def throwIfError() { if(!res.isSuccessful) throw new Exception(s"Request failed with code ${res.code()}") }
+    }
+
+    private implicit def tuple2FormPart(v: (String, String)) = MultipartBody.Part.createFormData(v._1, v._2)
+    private implicit def str2MediaType(v: String) = MediaType.parse(v)
+
+    def uploadMapping(proguard: Option[File], layout: ProjectLayout, converter: android.BuildOutput.Converter,
+                      verName: Option[String], verCode: Option[Int],
+                      apiKey: String, id: String, packageName: String,
+                      streams: TaskStreams, okHttpClient: OkHttpClient) = {
+      if(proguard.isDefined) {
+          import java.util.zip.{ZipEntry, ZipOutputStream}
+          val log = streams.log
+          // sbt-android writes into mappings.txt
+          val mapping = converter.apply(layout).proguardOut / "mappings.txt"
+          // DataDirDeobsManager#storeDeobfuscationFile
+          IO.withTemporaryFile("crashlytics_zipped_mapping_", "") { file =>
+            log.debug(s"Zipping mappings.txt file into ${file.getCanonicalPath}")
+            val out = new ZipOutputStream(new BufferedOutputStream(new FileOutputStream(file)))
+            // Crashlytics requires to zip 'mapping.txt' file
+            out.putNextEntry(new ZipEntry("mapping.txt"))
+            try {
+              IO.readBytes(mapping).grouped(2048).foreach(arr => out.write(arr))
+              out.flush()
+              out.closeEntry()
+            }
+            finally { out.close() }
+            val mappingUrl = API_MAPPING_UPLOAD_URL
+            log.info("Sending mapping.txt ...")
+            log.debug(s"Requested code mapping url: $mappingUrl")
+            okHttpClient.newCall(new Request.Builder().url(mappingUrl).crashlyticsHeaders(apiKey)
+              .post(new MultipartBody.Builder().setType(FORM)
+                .addPart("code_mapping[type]" -> "proguard")
+                .addPart(createFormData("code_mapping[file]", s"$id.zip", create("application/zip", file)))
+                .addPart("code_mapping[executables][][arch]" -> "java")
+                .addPart("code_mapping[executables][][identifier]" -> id.replace("-", "").toLowerCase)
+                .addPart("project[identifier]" -> packageName)
+                .addPart("project[build_version]" -> verCode.get.toString)
+                .addPart("project[display_version]" -> verName.get)
+                .build())
+              .build()).execute().throwIfError()
+          }
+      }
+      proguard
+    }
+    // DistributionTasks#uploadDistribution
+    def uploadDistribution(apk: File, packageName: String, id: String,
+                           verName: Option[String], verCode: Option[Int],
+                           apiKey: String, apiSecret: Option[String],
+                           editor: (String) => String, streams: TaskStreams,
+                           okHttpClient: OkHttpClient) {
+      // - Retrieving release notes via crashlyticsReleaseNotesCreator
+      // - Sending notes to Constants.API_BASE_NOTES_FORMAT
+      //   Without creating release notes the distribution will be uploaded successfully, but will be 'invisible'
+      // - Uploading distribution to Constants.API_DISTRIBUTION_UPLOAD_FORMAT
+      // todo apk sign check?
+      val unrolledSecret = apiSecret.getOrElse(fail("You must specify fabric.apiSecret before distribution uploading"))
+      val log = streams.log
+      val displayVersion = verName.getOrElse(DEFAULT_VERSION_NAME)
+      val buildVersion = verCode.getOrElse(DEFAULT_VERSION_CODE).toString
+      val notesText = editor(displayVersion)
+      log.info("Sending release notes:")
+      notesText.split('\n').foreach(v => log.info(" " * 1 + v)) // 1 is 'padding level'
+      val noteUrl = API_BASE_NOTES_FORMAT.format(packageName, id)
+      log.debug(s"Requested note url: $noteUrl")
+      // RestfulWebApi#performSetReleaseNotes
+      okHttpClient.newCall(new Request.Builder().url(noteUrl).crashlyticsHeaders(apiKey, unrolledSecret)
+        .method("PUT", new MultipartBody.Builder().setType(FORM)
+          .addPart("app[display_version]" -> displayVersion)
+          .addPart("app[build_version]" -> buildVersion)
+          // 'markdown' is also available, but seems like it doesn't make any difference
+          .addPart("release_notes[format]" -> "text")
+          .addPart("release_notes[body]" -> notesText)
+          .build())
+        .build()).execute().throwIfError()
+
+      import java.lang.System.nanoTime
+      import java.util.concurrent.TimeUnit.{NANOSECONDS, SECONDS}
+      val distributionUrl = API_DISTRIBUTION_UPLOAD_FORMAT.format(packageName)
+      log.info(s"Sending apk distribution ...") // todo add 'progressbar'
+      log.debug(s"Requested distribution url: $distributionUrl")
+      // RestfulWebApi#createDistribution
+      okHttpClient.newCall(new Request.Builder().url(distributionUrl).crashlyticsHeaders(apiKey, unrolledSecret)
+        // i think there is a lot of redundant parts, but gradle plugin does so
+        .post(new MultipartBody.Builder().setType(FORM)
+          .addPart(createFormData("distribution[file]", apk.getName(), create("application/octet-stream", apk)))
+          // 'true' and 'suppress' (wow) are available to notify (or not) your testers about new distributions
+          .addPart("send_notifications" -> "true")
+          .addPart("distribution[built_at]" -> SECONDS.convert(nanoTime(), NANOSECONDS).toString)
+          .addPart("app[instance_identifier]" -> id) // build_id
+          .addPart("app[display_version]" -> displayVersion)
+          .addPart("app[build_version]" -> buildVersion)
+          .addPart("app[type]" -> "android_app") // never changes
+          .addPart("app[slices][][arch]" -> "java") // it's too
+          .addPart("app[slices][][uuid]" -> id) // similar to instance_identifier
+          .build())
+        .build()).execute().throwIfError()
+    }
   }
 }

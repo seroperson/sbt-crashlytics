@@ -5,14 +5,14 @@ sbtPlugin := true
 
 // Dependency settings
 addSbtPlugin("org.scala-android" % "sbt-android" % "1.6.15")
-libraryDependencies += "org.scalaj" %% "scalaj-http" % "2.3.0"
+libraryDependencies += "com.squareup.okhttp3" % "okhttp" % "3.4.1"
 
 // Scripted testing settings
 ScriptedPlugin.scriptedSettings
 
 // Publishing-related settings
 name := "sbt-crashlytics"
-description := "Unofficial plugin that provides crashlytics support for android applications that was built via sbt"
+description := "Provides unofficial support for crashlytics on sbt"
 organization := "com.seroperson"
 licenses := Seq("MIT" -> url("http://www.opensource.org/licenses/MIT"))
 version := "0.3"

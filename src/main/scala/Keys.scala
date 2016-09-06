@@ -2,6 +2,7 @@ package crashlytics
 
 import java.io.File
 
+import okhttp3.OkHttpClient
 import sbt._
 
 object Keys {
@@ -11,6 +12,7 @@ object Keys {
   val fabricApiSecret = settingKey[Option[String]]("API Secret for the project")
   val crashlyticsLibraries = settingKey[Seq[ModuleID]]("By default there is the set of crashlytics libraries that will be added after settings applied. Overwrite if you need to change library version or something else")
   val crashlyticsBuildId = settingKey[String]("Build ID to determine any build")
+  val crashlyticsOkHttpClient = settingKey[OkHttpClient]("Client that performs API requests")
   // Names according to gradle plugin
   val crashlyticsUploadDistributionDebug = taskKey[Unit]("Upload debug apk file to Beta")
   val crashlyticsUploadDistributionRelease = taskKey[Unit]("Upload release apk file to Beta")
