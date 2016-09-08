@@ -6,8 +6,6 @@ import sbt._
 
 object Crashlytics extends AutoPlugin {
 
-  import java.util.Properties
-
   import Constants._
   import Keys._
   import okhttp3._
@@ -19,6 +17,7 @@ object Crashlytics extends AutoPlugin {
   override def requires = android.AndroidPlugin
 
   object autoImport {
+    import java.util.Properties
     val crashlyticsBuild = Seq(
       crashlyticsOkHttpClient := new OkHttpClient(),
       fabricPropertiesFile := new File("local.properties"),
@@ -36,7 +35,7 @@ object Crashlytics extends AutoPlugin {
       // The following library downloads all others as dependencies (beta, answers etc ...)
       crashlyticsLibraries := Seq("com.crashlytics.sdk.android" % "crashlytics" % DEPENDENCY_CRASHLYTICS_VERSION),
 
-      // TODO it must be generated after each successful packaging
+      // todo it must be generated after each successful packaging
       // XmlBuildWriter#updateBuildId
       crashlyticsBuildId := java.util.UUID.randomUUID.toString,
 
@@ -58,15 +57,13 @@ object Crashlytics extends AutoPlugin {
 
       // Or redefine the key to enforce some editor for all project members
       crashlyticsReleaseNotesCreator := (version => { // todo return just f0?
-        import sbt.IO._
-
-        withTemporaryFile("crashlytics_note_", "") { file =>
-          write(file, NOTES_DESCRIPTION_MESSAGE_FORMAT.format(version))
+        IO.withTemporaryFile("crashlytics_note_", "") { file =>
+          IO.write(file, NOTES_DESCRIPTION_MESSAGE_FORMAT.format(version))
           if (Process(Seq(sys.env.get("EDITOR").getOrElse(fail("Set $EDITOR env variable to edit the release notes")), file.getCanonicalPath)).!< == 0) {
-            readLines(file).foldLeft(StringBuilder.newBuilder)((b, l) => b.append(s"\n$l")).tail.toString()
+            IO.readLines(file).foldLeft(StringBuilder.newBuilder)((b, l) => b.append(s"\n$l")).tail.toString()
           }
           else {
-            fail("Notes aren't saved, editor finished with non-zero code.")
+            fail("Notes were not saved, editor finished with non-zero code.")
           }
         }
       }),
@@ -77,7 +74,6 @@ object Crashlytics extends AutoPlugin {
       // Injecting apiKey into the manifest
       processManifest <<= (fabricApiKey, processManifest) map { (key, file) =>
         import scala.xml._
-
         val xml = XML.loadFile(file)
         val prefix = xml.scope.getPrefix(android.Resources.ANDROID_NS)
         val application = xml \ "application"
@@ -110,9 +106,8 @@ object Crashlytics extends AutoPlugin {
 
   private def fail(m: String) = throw new MessageOnlyException(m)
 
-  private[this] object Api {
-    import java.io.{BufferedOutputStream, File, FileOutputStream}
-
+  private object Api {
+    import java.io.File
     import okhttp3.MultipartBody.FORM
     import okhttp3.MultipartBody.Part.createFormData
     import okhttp3.RequestBody.create
@@ -126,6 +121,7 @@ object Crashlytics extends AutoPlugin {
       def crashlyticsHeaders(apiKey: String, apiSecret: String): Request.Builder = crashlyticsHeaders(apiKey).header("X-CRASHLYTICS-BUILD-SECRET", apiSecret)
     }
     private implicit class RichResponse(res: Response) {
+      // todo is it really necessary?
       def throwIfError() { if(!res.isSuccessful) throw new Exception(s"Request failed with code ${res.code()}") }
     }
 
@@ -136,35 +132,33 @@ object Crashlytics extends AutoPlugin {
                       verName: Option[String], verCode: Option[Int],
                       apiKey: String, id: String, packageName: String,
                       streams: TaskStreams, okHttpClient: OkHttpClient) = {
+      // todo does we need to upload deobs just if there is mappings.txt is exists?
       if(proguard.isDefined) {
-          import java.util.zip.{ZipEntry, ZipOutputStream}
+          import java.util.zip.ZipEntry
+          import java.io.FileOutputStream
           val log = streams.log
           // sbt-android writes into mappings.txt
           val mapping = converter.apply(layout).proguardOut / "mappings.txt"
           // DataDirDeobsManager#storeDeobfuscationFile
           IO.withTemporaryFile("crashlytics_zipped_mapping_", "") { file =>
-            log.debug(s"Zipping mappings.txt file into ${file.getCanonicalPath}")
-            val out = new ZipOutputStream(new BufferedOutputStream(new FileOutputStream(file)))
-            // Crashlytics requires to zip 'mapping.txt' file
-            out.putNextEntry(new ZipEntry("mapping.txt"))
-            try {
-              IO.readBytes(mapping).grouped(2048).foreach(arr => out.write(arr))
+            Using.zipOutputStream(new FileOutputStream(file)) { out =>
+              // Crashlytics requires to zip 'mapping.txt' file
+              out.putNextEntry(new ZipEntry("mapping.txt"))
+              IO.readBytes(mapping).grouped(8192).foreach(arr => out.write(arr))
               out.flush()
               out.closeEntry()
             }
-            finally { out.close() }
-            val mappingUrl = API_MAPPING_UPLOAD_URL
             log.info("Sending mapping.txt ...")
-            log.debug(s"Requested code mapping url: $mappingUrl")
-            okHttpClient.newCall(new Request.Builder().url(mappingUrl).crashlyticsHeaders(apiKey)
+            okHttpClient.newCall(new Request.Builder().url(API_MAPPING_UPLOAD_URL)
+              .crashlyticsHeaders(apiKey)
               .post(new MultipartBody.Builder().setType(FORM)
                 .addPart("code_mapping[type]" -> "proguard")
                 .addPart(createFormData("code_mapping[file]", s"$id.zip", create("application/zip", file)))
                 .addPart("code_mapping[executables][][arch]" -> "java")
                 .addPart("code_mapping[executables][][identifier]" -> id.replace("-", "").toLowerCase)
                 .addPart("project[identifier]" -> packageName)
-                .addPart("project[build_version]" -> verCode.get.toString)
-                .addPart("project[display_version]" -> verName.get)
+                .addPart("project[display_version]" -> verName.getOrElse(DEFAULT_VERSION_NAME))
+                .addPart("project[build_version]" -> verCode.getOrElse(DEFAULT_VERSION_CODE).toString)
                 .build())
               .build()).execute().throwIfError()
           }
@@ -189,10 +183,9 @@ object Crashlytics extends AutoPlugin {
       val notesText = editor(displayVersion)
       log.info("Sending release notes:")
       notesText.split('\n').foreach(v => log.info(" " * 1 + v)) // 1 is 'padding level'
-      val noteUrl = API_BASE_NOTES_FORMAT.format(packageName, id)
-      log.debug(s"Requested note url: $noteUrl")
       // RestfulWebApi#performSetReleaseNotes
-      okHttpClient.newCall(new Request.Builder().url(noteUrl).crashlyticsHeaders(apiKey, unrolledSecret)
+      okHttpClient.newCall(new Request.Builder().url(API_BASE_NOTES_FORMAT.format(packageName, id))
+        .crashlyticsHeaders(apiKey, unrolledSecret)
         .method("PUT", new MultipartBody.Builder().setType(FORM)
           .addPart("app[display_version]" -> displayVersion)
           .addPart("app[build_version]" -> buildVersion)
@@ -204,11 +197,10 @@ object Crashlytics extends AutoPlugin {
 
       import java.lang.System.nanoTime
       import java.util.concurrent.TimeUnit.{NANOSECONDS, SECONDS}
-      val distributionUrl = API_DISTRIBUTION_UPLOAD_FORMAT.format(packageName)
       log.info(s"Sending apk distribution ...") // todo add 'progressbar'
-      log.debug(s"Requested distribution url: $distributionUrl")
       // RestfulWebApi#createDistribution
-      okHttpClient.newCall(new Request.Builder().url(distributionUrl).crashlyticsHeaders(apiKey, unrolledSecret)
+      okHttpClient.newCall(new Request.Builder().url(API_DISTRIBUTION_UPLOAD_FORMAT.format(packageName))
+        .crashlyticsHeaders(apiKey, unrolledSecret)
         // i think there is a lot of redundant parts, but gradle plugin does so
         .post(new MultipartBody.Builder().setType(FORM)
           .addPart(createFormData("distribution[file]", apk.getName(), create("application/octet-stream", apk)))
