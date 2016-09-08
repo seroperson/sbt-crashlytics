@@ -1,9 +1,9 @@
 Description
 ===========
 sbt-crashlytics - it's a sbt plugin that helps you to get deal with [crashlytics](https://fabric.io/kits/android/crashlytics/)
-and [sbt-android](https://github.com/scala-android/sbt-android). For now this plugin
-just does some preparations to make crashlytics works and provides initial support
-for uploading distributions to beta.
+and [sbt-android](https://github.com/scala-android/sbt-android). For now it does some
+preparations to make crashlytics works, provides initial support for uploading
+distributions to beta and provides support for deobs uploading.
 
 Usage
 =====
@@ -14,8 +14,7 @@ into the **local.properties** (by default):
 fabric.apiKey=my-api-key
 ```
 
-Now the action goes to **build.sbt** where you need to apply crashlytics settings to
-your android project:
+In **build.sbt** you need to apply crashlytics settings to your android project:
 
 ```scala
 androidBuild
@@ -32,7 +31,7 @@ So, that is basically all what you need.
 Tips
 ====
 While uploading apk to beta, you need to write release notes. By default, `$EDITOR`
-will be opened for this stuff. But if you too lazy for writing it by yourself, you can
+will be opened for this stuff. But if you are too lazy for writing it by yourself, you can
 redefine `crashlyticsReleaseNotesCreator` key to implement automatic generation.
 For example, you want to post your commit history since last tag along with distribution.
 It will be like that (*code isn't excellent and it's here just to show you how
@@ -54,7 +53,7 @@ Download
 Just include the following line in your **project/plugins.sbt**
 
 ```scala
-addSbtPlugin("com.seroperson" % "sbt-crashlytics" % "0.2")
+addSbtPlugin("com.seroperson" % "sbt-crashlytics" % "0.3")
 ```
 
 Be sure that you also included the latest version of sbt-android plugin.
